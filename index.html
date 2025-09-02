@@ -1,0 +1,432 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Vocab Trainer — index.html</title>
+
+  <!-- SheetJS pour lire .xlsx si besoin -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <style>
+    :root{
+      --bg: #0b0b0b;
+      --card: #ffffff;
+      --muted: #8b8f98;
+      --shadow: 0 18px 35px rgba(0,0,0,0.45);
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;color:#111}
+    body{background:var(--bg);display:flex;align-items:center;justify-content:center;padding:20px}
+
+    /* Stage + card */
+    .stage{position:relative;width:100%;max-width:920px;height:85vh;display:flex;align-items:center;justify-content:center}
+    .card{width:min(92vw,560px);height:min(70vh,420px);border-radius:24px;background:var(--card);box-shadow:var(--shadow);cursor:pointer;perspective:1200px;touch-action:none;user-select:none;display:block;overflow:hidden;position:relative}
+    .card-inner{width:100%;height:100%;transform-style:preserve-3d;transition:transform 480ms cubic-bezier(.2,.8,.2,1)}
+    .card.flipped .card-inner{transform:rotateY(180deg)}
+    .face{position:absolute;inset:0;border-radius:24px;display:grid;place-items:center;padding:28px;backface-visibility:hidden}
+    .face.back{transform:rotateY(180deg)}
+    .word{font-weight:800;font-size:clamp(28px,6vw,44px);text-align:center;line-height:1.05;word-break:break-word}
+    .hint{position:absolute;left:0;right:0;bottom:14px;text-align:center;color:var(--muted);font-size:13px}
+
+    /* floating buttons */
+    .fab{position:fixed;right:24px;bottom:24px;width:56px;height:56px;border-radius:999px;background:#fff;border:1px solid #e6e6e6;box-shadow:var(--shadow);display:grid;place-items:center;font-size:28px;cursor:pointer}
+    .toolbar{position:fixed;left:24px;bottom:24px;display:flex;gap:10px;flex-wrap:wrap}
+    .btn{background:#fff;border:1px solid #e6e6e6;padding:9px 12px;border-radius:12px;cursor:pointer;font-weight:600}
+
+    /* swipe helper badges */
+    .badge{position:absolute;top:18px;padding:6px 10px;border-radius:10px;font-weight:800;letter-spacing:.04em;font-size:12px;opacity:0;transition:opacity .12s}
+    .badge.like{left:18px;background:#ecfeff;border:2px solid #06b6d4;color:#0e7490;transform:rotate(-12deg)}
+    .badge.nope{right:18px;background:#fff1f2;border:2px solid #ef4444;color:#991b1b;transform:rotate(12deg)}
+
+    /* Modal overlay (custom) */
+    .overlay{position:fixed;inset:0;background:rgba(0,0,0,0.6);display:none;align-items:center;justify-content:center;padding:20px;z-index:60}
+    .overlay.open{display:flex}
+    .modal{width:100%;max-width:680px;background:#fff;color:#000;border-radius:14px;padding:18px;box-shadow:0 30px 60px rgba(2,6,23,0.6)}
+    .modal h3{margin:0 0 8px;font-size:18px}
+    .row{display:flex;gap:10px}
+    input[type="text"], textarea{width:100%;padding:10px;border:1px solid #e5e7eb;border-radius:10px;font-size:15px}
+    .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:10px}
+    .small{font-size:13px;color:#505050}
+
+    /* responsive */
+    @media (max-width:480px){ .card{border-radius:18px} .word{font-size:28px} }
+  </style>
+</head>
+<body>
+  <div class="stage" role="application" aria-label="Vocab Trainer">
+    <div id="card" class="card" aria-live="polite" title="Cliquez pour retourner, glissez pour changer">
+      <div class="card-inner" id="cardInner">
+        <div class="face front">
+          <div class="word" id="frontText">Ajoutez votre premier mot</div>
+          <div class="hint">Tapez pour retourner • Glissez pour mot suivant</div>
+        </div>
+        <div class="face back">
+          <div class="word" id="backText">Add your first word</div>
+          <div class="hint">Tapez pour revenir</div>
+        </div>
+      </div>
+
+      <div class="badge like" id="likeBadge">NEXT →</div>
+      <div class="badge nope" id="nopeBadge">← NEXT</div>
+    </div>
+  </div>
+
+  <!-- floating action + toolbar -->
+  <button class="fab" id="fab" title="Ajouter un mot">＋</button>
+
+  <div class="toolbar" role="toolbar" aria-label="Outils">
+    <button class="btn" id="importBtn">Import CSV/XLSX</button>
+    <button class="btn" id="exportBtn">Export CSV</button>
+    <button class="btn" id="clearBtn">Clear All</button>
+    <input id="fileInput" type="file" accept=".csv,.txt,.xlsx,.xls" style="display:none" />
+  </div>
+
+  <!-- custom modal -->
+  <div id="overlay" class="overlay" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal" role="document">
+      <h3>Ajouter un mot</h3>
+
+      <div style="margin-bottom:10px">
+        <label class="small">Manuel</label>
+        <div class="row" style="margin-top:6px">
+          <input id="enInput" type="text" placeholder="English (ex: apple)" />
+          <input id="frInput" type="text" placeholder="French (ex: pomme)" />
+        </div>
+        <div class="actions" style="margin-top:8px">
+          <button class="btn" id="saveBtn">Ajouter</button>
+          <button class="btn" id="closeModal">Fermer</button>
+        </div>
+      </div>
+
+      <hr style="border:none;border-top:1px solid #eee;margin:12px 0">
+
+      <div>
+        <label class="small">Ajout en masse (CSV : english,french par ligne)</label>
+        <textarea id="bulkArea" rows="5" placeholder="apple,pomme\nbook,livre" style="margin-top:8px"></textarea>
+        <div class="actions" style="margin-top:8px">
+          <button class="btn" id="bulkAddBtn">Ajouter la liste</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function(){
+    // Key pour localStorage
+    const LS_KEY = 'vocab.words.v1';
+
+    // DOM
+    const card = document.getElementById('card');
+    const cardInner = document.getElementById('cardInner');
+    const frontText = document.getElementById('frontText');
+    const backText = document.getElementById('backText');
+    const likeBadge = document.getElementById('likeBadge');
+    const nopeBadge = document.getElementById('nopeBadge');
+
+    const fab = document.getElementById('fab');
+    const overlay = document.getElementById('overlay');
+    const closeModal = document.getElementById('closeModal');
+    const saveBtn = document.getElementById('saveBtn');
+    const bulkAddBtn = document.getElementById('bulkAddBtn');
+    const enInput = document.getElementById('enInput');
+    const frInput = document.getElementById('frInput');
+    const bulkArea = document.getElementById('bulkArea');
+
+    const importBtn = document.getElementById('importBtn');
+    const exportBtn = document.getElementById('exportBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const fileInput = document.getElementById('fileInput');
+
+    // State
+    let words = loadWords();
+    let current = null;
+    let flipped = false;
+
+    // Utils
+    function loadWords(){
+      try {
+        const raw = localStorage.getItem(LS_KEY);
+        return raw ? JSON.parse(raw) : [];
+      } catch(e){
+        console.error('Erreur localStorage:', e);
+        return [];
+      }
+    }
+    function saveWords(){
+      try { localStorage.setItem(LS_KEY, JSON.stringify(words)); } catch(e){ console.error(e); }
+    }
+    function pickRandom(){
+      if (!words.length) return null;
+      return words[Math.floor(Math.random()*words.length)];
+    }
+    function escapeCSVCell(s){
+      if (s == null) return '';
+      const str = String(s);
+      if (/[",\n]/.test(str)) return '"' + str.replace(/"/g,'""') + '"';
+      return str;
+    }
+
+    // Render current card
+    function render(){
+      if (!current){
+        frontText.textContent = 'Ajoutez votre premier mot';
+        backText.textContent = 'Add your first word';
+        card.classList.remove('flipped');
+        return;
+      }
+      frontText.textContent = current.english;
+      backText.textContent = current.french;
+      if (flipped) card.classList.add('flipped'); else card.classList.remove('flipped');
+    }
+
+    function nextWord(){
+      flipped = false;
+      current = pickRandom();
+      render();
+    }
+
+    // Initial
+    nextWord();
+
+    // Flip on click/tap
+    card.addEventListener('click', (e) => {
+      // If user clicked while dragging, ignore (dragging handled separately)
+      if (isDragging) return;
+      flipped = !flipped;
+      render();
+    });
+
+    // Swipe detection (pointer events)
+    let isDragging = false;
+    let startX = 0, startY = 0;
+    let lastDx = 0;
+
+    card.addEventListener('pointerdown', e => {
+      isDragging = true;
+      startX = e.clientX;
+      startY = e.clientY;
+      lastDx = 0;
+      card.setPointerCapture(e.pointerId);
+      card.style.transition = ''; // cancel transitions while dragging
+    });
+    card.addEventListener('pointermove', e => {
+      if (!isDragging) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      lastDx = dx;
+      // soft rotation based on dx
+      const rot = dx * 0.04;
+      card.style.transform = `translateX(${dx}px) translateY(${dy*0.06}px) rotate(${rot}deg)`;
+      // badges
+      const alpha = Math.min(1, Math.abs(dx)/140);
+      if (dx > 0){
+        likeBadge.style.opacity = alpha;
+        nopeBadge.style.opacity = 0;
+      } else {
+        nopeBadge.style.opacity = alpha;
+        likeBadge.style.opacity = 0;
+      }
+    });
+    function endDrag(e){
+      if (!isDragging) return;
+      isDragging = false;
+      card.releasePointerCapture && card.releasePointerCapture(e.pointerId);
+      likeBadge.style.opacity = 0;
+      nopeBadge.style.opacity = 0;
+
+      const dx = lastDx;
+      const threshold = 110;
+      if (Math.abs(dx) > threshold){
+        // animate out then reset and show next
+        const dir = Math.sign(dx);
+        card.style.transition = 'transform 260ms ease-out, opacity 260ms ease-out';
+        card.style.transform = `translateX(${dir*900}px) rotate(${dir*18}deg)`;
+        card.style.opacity = '0.25';
+        setTimeout(()=>{
+          card.style.transition = '';
+          card.style.transform = '';
+          card.style.opacity = '';
+          nextWord();
+        }, 260);
+      } else {
+        // reset
+        card.style.transition = 'transform 220ms cubic-bezier(.2,.9,.3,1)';
+        card.style.transform = '';
+        setTimeout(()=> card.style.transition = '', 240);
+      }
+    }
+    card.addEventListener('pointerup', endDrag);
+    card.addEventListener('pointercancel', endDrag);
+    // also cover mouseleave (if dragging with mouse)
+    card.addEventListener('mouseleave', (e)=> { if (isDragging) endDrag(e); });
+
+    // Modal open/close (custom)
+    function openModal(){
+      overlay.classList.add('open');
+      overlay.setAttribute('aria-hidden','false');
+      // small delay to focus first field
+      setTimeout(()=> enInput.focus(), 60);
+    }
+    function closeModalFunc(){
+      overlay.classList.remove('open');
+      overlay.setAttribute('aria-hidden','true');
+    }
+    fab.addEventListener('click', openModal);
+    closeModal.addEventListener('click', closeModalFunc);
+    overlay.addEventListener('click', (e)=> { if (e.target === overlay) closeModalFunc(); }); // click outside to close
+
+    // Add single word
+    saveBtn.addEventListener('click', ()=>{
+      const en = enInput.value.trim();
+      const fr = frInput.value.trim();
+      if (!en || !fr){ alert('Remplis l\'anglais et le français.'); return; }
+      words.push({english: en, french: fr});
+      saveWords();
+      enInput.value = ''; frInput.value = '';
+      if (!current) nextWord();
+      render();
+      closeModalFunc();
+    });
+
+    // Bulk add
+    bulkAddBtn.addEventListener('click', ()=>{
+      const text = bulkArea.value.trim();
+      if (!text){ alert('Colle ta liste CSV dans la zone.'); return; }
+      let added = 0;
+      const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+      for (const line of lines){
+        // split on first comma or tab
+        let parts = line.split(',');
+        if (parts.length < 2) parts = line.split('\\t');
+        if (parts.length >= 2){
+          const en = parts[0].trim();
+          const fr = parts[1].trim();
+          if (en && fr){ words.push({english: en, french: fr}); added++; }
+        }
+      }
+      if (!added){ alert('Aucun mot ajouté (format attendu: english,french par ligne).'); return; }
+      saveWords();
+      bulkArea.value = '';
+      nextWord();
+      render();
+      closeModalFunc();
+    });
+
+    // Import (CSV/XLSX)
+    importBtn.addEventListener('click', ()=> fileInput.click());
+    fileInput.addEventListener('change', async (e)=>{
+      const file = e.target.files && e.target.files[0];
+      e.target.value = '';
+      if (!file) return;
+      const name = file.name.toLowerCase();
+      try {
+        if (name.endsWith('.csv') || name.endsWith('.txt')){
+          const text = await file.text();
+          parseCSVText(text);
+        } else if (name.endsWith('.xlsx') || name.endsWith('.xls')){
+          const ab = await file.arrayBuffer();
+          const wb = XLSX.read(ab, {type:'array'});
+          const sheet = wb.Sheets[wb.SheetNames[0]];
+          const rows = XLSX.utils.sheet_to_json(sheet, {header:1});
+          let added = 0;
+          for (const r of rows){
+            if (!r || r.length < 2) continue;
+            const en = String(r[0] ?? '').trim();
+            const fr = String(r[1] ?? '').trim();
+            if (en && fr){ words.push({english: en, french: fr}); added++; }
+          }
+          if (!added) alert('Aucun mot trouvé dans le fichier Excel (les 2 premières colonnes attendues).');
+          else { saveWords(); nextWord(); render(); alert(`${added} mot(s) importé(s).`); }
+        } else {
+          alert('Type de fichier non supporté. Utilise CSV ou XLSX.');
+        }
+      } catch(err){
+        console.error(err);
+        alert('Erreur lors de l\'import : ' + (err && err.message ? err.message : 'voir console'));
+      }
+    });
+
+    function parseCSVText(text){
+      const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+      let added = 0;
+      for (const line of lines){
+        // naive CSV split: handle simple quoted cells
+        const parts = smartSplitCSV(line);
+        if (parts.length >= 2){
+          const en = parts[0].trim();
+          const fr = parts[1].trim();
+          if (en && fr){ words.push({english: en, french: fr}); added++; }
+        }
+      }
+      if (!added) alert('Aucun mot trouvé dans le CSV (format: english,french par ligne).');
+      else { saveWords(); nextWord(); render(); alert(`${added} mot(s) importé(s).`); }
+    }
+
+    // simple CSV splitter handling quoted cells (not full CSV parser but robust enough)
+    function smartSplitCSV(line){
+      const result = [];
+      let cur = '', inQuotes = false;
+      for (let i=0;i<line.length;i++){
+        const ch = line[i];
+        if (ch === '"' ){
+          if (inQuotes && line[i+1] === '"'){ cur += '"'; i++; continue; } // escaped quote
+          inQuotes = !inQuotes;
+          continue;
+        }
+        if (!inQuotes && ch === ','){
+          result.push(cur);
+          cur = '';
+          continue;
+        }
+        cur += ch;
+      }
+      result.push(cur);
+      return result.map(s=>s.trim());
+    }
+
+    // Export CSV
+    exportBtn.addEventListener('click', ()=>{
+      if (!words.length){ alert('Aucun mot à exporter.'); return; }
+      const header = 'english,french\n';
+      const csv = header + words.map(w => `${escapeCSVCell(w.english)},${escapeCSVCell(w.french)}`).join('\\n');
+      const blob = new Blob([csv], {type:'text/csv;charset=utf-8;'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'vocab_export.csv';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(()=> URL.revokeObjectURL(url), 1000);
+    });
+
+    // Clear all
+    clearBtn.addEventListener('click', ()=>{
+      if (!confirm('Supprimer tous les mots sauvegardés ?')) return;
+      words = [];
+      saveWords();
+      nextWord();
+      render();
+    });
+
+    // Small helper: if user double-clicks on fab, prevent accidental
+    fab.addEventListener('dblclick', e=> e.preventDefault());
+
+    // Accessibility: ESC to close modal
+    window.addEventListener('keydown', (e)=>{
+      if (e.key === 'Escape' && overlay.classList.contains('open')) closeModalFunc();
+    });
+
+    // final render
+    render();
+
+    // If the user previously had words, but current is null (first load), pick one
+    if (!current && words.length) nextWord();
+
+    // Debug help: if something ne marche toujours pas, ouvre la console F12
+    // (non intrusif comment)
+
+  })();
+  </script>
+</body>
+</html>
