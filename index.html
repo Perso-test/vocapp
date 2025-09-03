@@ -35,6 +35,8 @@
     /* floating buttons */
     .fab{position:fixed;right:24px;bottom:24px;width:56px;height:56px;border-radius:999px;background:#fff;border:1px solid #e6e6e6;box-shadow:var(--shadow);display:grid;place-items:center;font-size:28px;cursor:pointer}
     .fab-mini{position:fixed;left:24px;bottom:24px;width:48px;height:48px;border-radius:999px;background:#fff;border:1px solid #e6e6e6;box-shadow:var(--shadow);display:grid;place-items:center;font-size:26px;font-weight:700;cursor:pointer}
+    /* Bouton centré (nouveau) */
+    .fab-center{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);width:52px;height:52px;border-radius:999px;background:#fff;border:1px solid #e6e6e6;box-shadow:var(--shadow);display:grid;place-items:center;font-size:22px;font-weight:800;cursor:pointer}
 
     /* (Ancienne) toolbar — on ne l’utilise plus pour les boutons visibles */
     .toolbar{position:fixed;left:24px;bottom:88px;display:flex;gap:10px;flex-wrap:wrap}
@@ -70,12 +72,16 @@
 
     /* responsive */
     @media (max-width:480px){ .card{border-radius:18px} .word{font-size:28px} }
-    
 
     /* Couleur de la traduction (face dos) */
     .face.back .word { color: #1d4ed8; } /* bleu */
 
-    </style>
+    /* Modale Infos (nouveau) */
+    .info-modal .modal{max-width:700px}
+    .muted{color:#6b7280;font-size:13px}
+    .def-list{display:flex;flex-direction:column;gap:8px;margin-top:8px}
+    .def{border:1px solid #e5e7eb;border-radius:12px;padding:10px}
+  </style>
 </head>
 <body>
   <!-- Compteur -->
@@ -104,6 +110,9 @@
 
   <!-- bouton − (panneau gestion + Clear All) -->
   <button class="fab-mini" id="manageBtn" title="Gérer / Supprimer">−</button>
+
+  <!-- bouton Infos (nouveau, centré) -->
+  <button class="fab-center" id="infoBtn" title="Infos (Google Trad + définition)">i</button>
 
   <!-- toolbar technique (on garde seulement l'input fichier caché) -->
   <div class="toolbar" role="toolbar" aria-label="Outils" style="pointer-events:none">
@@ -164,6 +173,26 @@ book,livre" style="margin-top:8px"></textarea>
     </div>
   </div>
 
+  <!-- Modale Infos (nouveau) -->
+  <div id="infoOverlay" class="overlay info-modal" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal" role="document">
+      <h3>Infos sur le mot</h3>
+      <div class="row" style="align-items:center;margin-top:6px">
+        <div id="infoWord" class="pill">—</div>
+        <div id="phonetics" class="small" style="margin-left:8px"></div>
+        <div style="flex:1"></div>
+        <a id="gtransLink" class="btn" target="_blank" rel="noopener">Ouvrir dans Google Traduction</a>
+        <button class="btn" id="closeInfo">Fermer</button>
+      </div>
+      <div class="small" style="margin-top:8px">Définitions (anglais):</div>
+      <div id="defs" class="def-list"></div>
+      <div id="defsEmpty" class="small" style="display:none;margin-top:6px;color:#6b7280">Aucune définition trouvée.</div>
+      <div class="small" style="margin-top:10px;color:#6b7280">
+        Astuce: la traduction s’ouvre en EN → FR. Vous pouvez changer la langue cible dans Google Traduction.
+      </div>
+    </div>
+  </div>
+
   <script>
   (function(){
     // Key pour localStorage
@@ -200,6 +229,16 @@ book,livre" style="margin-top:8px"></textarea>
 
     const countNum = document.getElementById('countNum');
 
+    // Infos (nouveau)
+    const infoBtn = document.getElementById('infoBtn');
+    const infoOverlay = document.getElementById('infoOverlay');
+    const closeInfo = document.getElementById('closeInfo');
+    const infoWord = document.getElementById('infoWord');
+    const gtransLink = document.getElementById('gtransLink');
+    const defs = document.getElementById('defs');
+    const defsEmpty = document.getElementById('defsEmpty');
+    const phonetics = document.getElementById('phonetics');
+
     // State
     let words = loadWords();
     let current = null;
@@ -231,6 +270,9 @@ book,livre" style="margin-top:8px"></textarea>
       if (/[",\n]/.test(str)) return '"' + str.replace(/"/g,'""') + '"';
       return str;
     }
+    function escapeHTML(s){
+      return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+    }
 
     // Render current card
     function render(){
@@ -256,15 +298,14 @@ book,livre" style="margin-top:8px"></textarea>
     updateCounter();
 
     // Flip on click/tap
+    let isDragging = false; // utilisé aussi par le swipe
     card.addEventListener('click', (e) => {
-      // If user clicked while dragging, ignore (dragging handled separately)
-      if (isDragging) return;
+      if (isDragging) return; // éviter les clics pendant le drag
       flipped = !flipped;
       render();
     });
 
     // Swipe detection (pointer events) — CODE D’ORIGINE
-    let isDragging = false;
     let startX = 0, startY = 0;
     let lastDx = 0;
 
@@ -323,7 +364,6 @@ book,livre" style="margin-top:8px"></textarea>
     }
     card.addEventListener('pointerup', endDrag);
     card.addEventListener('pointercancel', endDrag);
-    // aussi couvrir mouseleave (si drag à la souris)
     card.addEventListener('mouseleave', (e)=> { if (isDragging) endDrag(e); });
 
     // Modal (+) open/close
@@ -482,10 +522,6 @@ book,livre" style="margin-top:8px"></textarea>
     closeManage.addEventListener('click', closeManageFunc);
     manageOverlay.addEventListener('click', (e)=> { if (e.target === manageOverlay) closeManageFunc(); });
 
-    function escapeHTML(s){
-      return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
-    }
-
     function rebuildList(){
       const q = (searchInput.value || '').toLowerCase().trim();
       const frag = document.createDocumentFragment();
@@ -544,15 +580,24 @@ book,livre" style="margin-top:8px"></textarea>
     searchInput.addEventListener('input', rebuildList);
     resetSearch.addEventListener('click', ()=>{ searchInput.value=''; rebuildList(); });
 
-    // Clear All — uniquement dans le panneau −
+    // Clear All — réparation: reset complet et nettoyage du localStorage
     clearBtn.addEventListener('click', ()=>{
       if (!confirm('Supprimer tous les mots sauvegardés ?')) return;
+      try {
+        localStorage.removeItem(LS_KEY); // force le vidage clé
+      } catch(e){
+        console.warn('removeItem échoué, on continue avec setItem([]).', e);
+      }
       words = [];
-      saveWords();
-      updateCounter();
-      nextWord();
-      render();
-      rebuildList();
+      saveWords();                 // garde l’état cohérent même si removeItem a échoué
+      updateCounter();             // compteur → 0
+      flipped = false;
+      current = null;              // évite de garder l’ancien mot affiché
+      render();                    // met à jour la carte avec les placeholders
+      rebuildList();               // vide la liste de gestion
+      // Option: laisser le panneau ouvert. Si tu préfères, dé-commente la ligne suivante:
+      // closeManageFunc();
+      alert('Tous les mots ont été supprimés.');
     });
 
     // Accessibilité: ESC pour fermer modales
@@ -560,6 +605,7 @@ book,livre" style="margin-top:8px"></textarea>
       if (e.key === 'Escape'){
         if (overlay.classList.contains('open')) closeModalFunc();
         if (manageOverlay.classList.contains('open')) closeManageFunc();
+        if (infoOverlay.classList.contains('open')) closeInfoFunc();
       }
     });
 
@@ -568,6 +614,77 @@ book,livre" style="margin-top:8px"></textarea>
 
     // Si l'utilisateur avait des mots, mais current est null (premier load), pick one
     if (!current && words.length) nextWord();
+
+    /* =========================
+       MODALE INFOS (nouveau)
+       ========================= */
+    infoBtn.addEventListener('click', ()=>{
+      if (!current || !current.english){
+        alert('Aucun mot sélectionné.');
+        return;
+      }
+      openInfoModal(current.english);
+    });
+
+        function openInfoModal(word){
+      infoWord.textContent = word;
+      phonetics.textContent = '';
+      defs.innerHTML = '';
+      defsEmpty.style.display = 'none';
+
+      // Lien Google Traduction EN -> FR
+      const url = 'https://translate.google.com/?sl=en&tl=fr&text=' + encodeURIComponent(word) + '&op=translate';
+      gtransLink.href = url;
+
+      infoOverlay.classList.add('open');
+      infoOverlay.setAttribute('aria-hidden','false');
+
+      // Récupérer définition (API gratuite)
+      fetch('https://api.dictionaryapi.dev/api/v2/entries/en/' + encodeURIComponent(word))
+        .then(r => r.ok ? r.json() : Promise.reject())
+        .then(json => {
+          try {
+            const entry = Array.isArray(json) ? json[0] : null;
+            if (!entry){ defsEmpty.style.display = 'block'; return; }
+
+            const ph = (entry.phonetics||[]).find(p=>p.text)?.text;
+            if (ph) phonetics.textContent = ph;
+
+            const listFrag = document.createDocumentFragment();
+            (entry.meanings||[]).forEach(m=>{
+              const part = m.partOfSpeech ? ` (${m.partOfSpeech})` : '';
+              (m.definitions||[]).slice(0,3).forEach(d=>{
+                const div = document.createElement('div');
+                div.className = 'def';
+                div.innerHTML = `
+                  <div><strong>• ${escapeHTML(word)}</strong>${escapeHTML(part)}</div>
+                  <div>${escapeHTML(d.definition||'')}</div>
+                  ${d.example ? `<div class="muted">Ex: ${escapeHTML(d.example)}</div>` : ''}
+                `;
+                listFrag.appendChild(div);
+              });
+            });
+            if (!listFrag.childNodes.length){
+              defsEmpty.style.display = 'block';
+            } else {
+              defs.appendChild(listFrag);
+            }
+          } catch(e){
+            defsEmpty.style.display = 'block';
+          }
+        })
+        .catch(()=>{ defsEmpty.style.display = 'block'; });
+    }
+    // fin openInfoModal(...)
+
+    function closeInfoFunc(){
+      infoOverlay.classList.remove('open');
+      infoOverlay.setAttribute('aria-hidden','true');
+    }
+    closeInfo.addEventListener('click', closeInfoFunc);
+    infoOverlay.addEventListener('click', (e)=> { if (e.target === infoOverlay) closeInfoFunc(); });
+    infoBtn.addEventListener('dblclick', e=> e.preventDefault()); // éviter double-clic
+
   })();
   </script>
 </body>
